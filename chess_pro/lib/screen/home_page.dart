@@ -269,50 +269,60 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     // Use SafeArea to avoid system UI and ensure content fits
     return Scaffold(
+      resizeToAvoidBottomInset: false,
       appBar: AppBar(title: const Text('Chess — Local + Firestore')),
       drawer: _buildDrawer(),
       body: SafeArea(
-        child: Column(
-          children: [
-            // Board area (Expanded so it adapts but board itself limits height)
-            Expanded(
-              child: Padding(
+        child: SingleChildScrollView(
+          child: Column(
+            children: [
+              // Board area
+              Padding(
                 padding: const EdgeInsets.all(12.0),
                 child: FlutterChessWidget(
                   controller: _controller,
                   onFenChanged: _onFenChanged,
                 ),
               ),
-            ),
 
-            // Bottom info area: player name, room id, players list (fixed height)
-            Container(
-              color: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 10.0),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(child: Text('Player: ${_playerName.isEmpty ? "(set your name from menu)" : _playerName}')),
-                      const SizedBox(width: 12),
-                      Text('Room: ${_roomId.isEmpty ? "(not in room)" : _roomId}'),
-                      const SizedBox(width: 8),
-                      IconButton(onPressed: _copyRoomId, icon: const Icon(Icons.copy)),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      const Text('Players in room: '),
-                      const SizedBox(width: 8),
-                      Expanded(child: _playersWidget()),
-                    ],
-                  ),
-                ],
+              // Divider (optional)
+              const Divider(),
+
+              // Bottom info area
+              Container(
+                width: double.infinity,
+                color: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 10.0),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Player: ${_playerName.isEmpty ? "(set your name from menu)" : _playerName}',
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Text('Room: ${_roomId.isEmpty ? "(not in room)" : _roomId}'),
+                        const SizedBox(width: 8),
+                        IconButton(onPressed: _copyRoomId, icon: const Icon(Icons.copy)),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('Players in room: '),
+                        const SizedBox(width: 8),
+                        Expanded(child: _playersWidget()),
+                      ],
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

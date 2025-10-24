@@ -41,48 +41,47 @@ class DefaultFirebaseOptions {
   }
 
   static const FirebaseOptions web = FirebaseOptions(
-    apiKey: 'AIzaSyDuTL-4JWgUpOkFMuqYPNPwqce9ATPqW7U',
-    appId: '1:929898668919:web:2a933b0b2112263c983772',
-    messagingSenderId: '929898668919',
-    projectId: 'test-7e1a5',
-    authDomain: 'test-7e1a5.firebaseapp.com',
-    storageBucket: 'test-7e1a5.firebasestorage.app',
-    measurementId: 'G-VCP8NLM78K',
+    apiKey: 'AIzaSyD1M7Z4gKr884af185ykRRBm9Tu7uiBtrA',
+    appId: '1:431342837775:web:a525d8e9644aa939ae437a',
+    messagingSenderId: '431342837775',
+    projectId: 'chess-pro-app',
+    authDomain: 'chess-pro-app.firebaseapp.com',
+    storageBucket: 'chess-pro-app.firebasestorage.app',
   );
 
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'AIzaSyA2iydUpW2eiZSfl8PzMbknOuoitAG7tnQ',
-    appId: '1:929898668919:android:75bb025ab8e0742a983772',
-    messagingSenderId: '929898668919',
-    projectId: 'test-7e1a5',
-    storageBucket: 'test-7e1a5.firebasestorage.app',
+    apiKey: 'AIzaSyAlL6dIiSZt-t1q1qFDBgQC_DuZalhwoOs',
+    appId: '1:431342837775:android:7c2d46794623defcae437a',
+    messagingSenderId: '431342837775',
+    projectId: 'chess-pro-app',
+    storageBucket: 'chess-pro-app.firebasestorage.app',
   );
 
   static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'AIzaSyAHlk24vaflLND73oeZ47CoSho7FvrRRsk',
-    appId: '1:929898668919:ios:0f3aebf62c043e79983772',
-    messagingSenderId: '929898668919',
-    projectId: 'test-7e1a5',
-    storageBucket: 'test-7e1a5.firebasestorage.app',
+    apiKey: 'AIzaSyCTL1H4OI5xSBFprpvjeGXSsoId7wv5rGA',
+    appId: '1:431342837775:ios:886a69ee28b06c02ae437a',
+    messagingSenderId: '431342837775',
+    projectId: 'chess-pro-app',
+    storageBucket: 'chess-pro-app.firebasestorage.app',
     iosBundleId: 'com.example.chess',
   );
 
   static const FirebaseOptions macos = FirebaseOptions(
-    apiKey: 'AIzaSyAHlk24vaflLND73oeZ47CoSho7FvrRRsk',
-    appId: '1:929898668919:ios:0f3aebf62c043e79983772',
-    messagingSenderId: '929898668919',
-    projectId: 'test-7e1a5',
-    storageBucket: 'test-7e1a5.firebasestorage.app',
+    apiKey: 'AIzaSyCTL1H4OI5xSBFprpvjeGXSsoId7wv5rGA',
+    appId: '1:431342837775:ios:886a69ee28b06c02ae437a',
+    messagingSenderId: '431342837775',
+    projectId: 'chess-pro-app',
+    storageBucket: 'chess-pro-app.firebasestorage.app',
     iosBundleId: 'com.example.chess',
   );
 
   static const FirebaseOptions windows = FirebaseOptions(
-    apiKey: 'AIzaSyDuTL-4JWgUpOkFMuqYPNPwqce9ATPqW7U',
-    appId: '1:929898668919:web:404b0cb44b4bec9a983772',
-    messagingSenderId: '929898668919',
-    projectId: 'test-7e1a5',
-    authDomain: 'test-7e1a5.firebaseapp.com',
-    storageBucket: 'test-7e1a5.firebasestorage.app',
-    measurementId: 'G-X1PY7759S9',
+    apiKey: 'AIzaSyD1M7Z4gKr884af185ykRRBm9Tu7uiBtrA',
+    appId: '1:431342837775:web:f7aa8d3e70a51d34ae437a',
+    messagingSenderId: '431342837775',
+    projectId: 'chess-pro-app',
+    authDomain: 'chess-pro-app.firebaseapp.com',
+    storageBucket: 'chess-pro-app.firebasestorage.app',
   );
+
 }
