@@ -7,6 +7,7 @@ import 'package:flutter_chess_board/flutter_chess_board.dart';
 
 import '../services/firestore_service.dart';
 import '../widgets/chess_board_widget.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -23,7 +24,7 @@ class _HomePageState extends State<HomePage> {
   String _roomId = '';
   StreamSubscription? _roomSub;
   bool _isApplyingRemote = false;
-
+  bool _hasShownSurrenderMessage = false; // thêm biến này ở đầu State class
   String _playerName = '';
   List<String> _playersInRoom = [];
 
@@ -42,18 +43,29 @@ class _HomePageState extends State<HomePage> {
         title: const Text('Set your name'),
         content: TextField(
           controller: controller,
-          decoration: const InputDecoration(hintText: 'Enter your display name'),
+          decoration: const InputDecoration(
+            hintText: 'Enter your display name',
+          ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(null), child: const Text('Cancel')),
-          ElevatedButton(onPressed: () => Navigator.of(ctx).pop(controller.text.trim()), child: const Text('Save')),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(null),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(controller.text.trim()),
+            child: const Text('Save'),
+          ),
         ],
       ),
     );
 
     if (result != null && result.isNotEmpty) {
       setState(() => _playerName = result);
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Name set: $_playerName')));
+      if (mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Name set: $_playerName')));
       if (_roomId.isNotEmpty) {
         await _fsService.addPlayerToRoom(_roomId, _playerName);
       }
@@ -69,7 +81,10 @@ class _HomePageState extends State<HomePage> {
     final id = await _fsService.createRoom(_controller.getFen(), _playerName);
     setState(() => _roomId = id);
     _listenRoom(id);
-    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Room created: $id')));
+    if (mounted)
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Room created: $id')));
   }
 
   Future<void> _joinRoom() async {
@@ -92,7 +107,10 @@ class _HomePageState extends State<HomePage> {
 
     setState(() => _roomId = roomIdToJoin);
     _listenRoom(roomIdToJoin);
-    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Joined room: $roomIdToJoin')));
+    if (mounted)
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Joined room: $roomIdToJoin')));
   }
 
   Future<String?> _showJoinDialog() async {
@@ -106,12 +124,49 @@ class _HomePageState extends State<HomePage> {
           decoration: const InputDecoration(hintText: 'Enter Room ID'),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(null), child: const Text('Cancel')),
-          ElevatedButton(onPressed: () => Navigator.of(ctx).pop(controller.text.trim()), child: const Text('Join')),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(null),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(controller.text.trim()),
+            child: const Text('Join'),
+          ),
         ],
       ),
     );
     return result;
+  }
+
+  Future<void> _surrender() async {
+    if (_roomId.isEmpty || _playerName.isEmpty) return;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Xác nhận đầu hàng'),
+        content: const Text('Bạn có chắc muốn đầu hàng ván này không?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Hủy'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Đầu hàng'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    await _fsService.surrender(_roomId, _playerName);
+    if (mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Bạn đã đầu hàng!')));
+    }
   }
 
   void _listenRoom(String roomId) {
@@ -121,6 +176,15 @@ class _HomePageState extends State<HomePage> {
         setState(() => _playersInRoom = []);
         return;
       }
+      if (data.containsKey('surrenderedBy')) {
+        final surrenderedBy = data['surrenderedBy'] as String;
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('$surrenderedBy đã đầu hàng!')),
+          );
+        }
+      }
+
       final fen = data['fen'] as String? ?? '';
       final players = <String>[];
       if (data.containsKey('players')) {
@@ -146,17 +210,46 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
-  void _onFenChanged(String fen) {
+  void _onFenChanged(String fen) async {
     if (_isApplyingRemote) return;
     if (_roomId.isNotEmpty) {
-      _fsService.updateRoomFen(_roomId, fen);
+      if (fen == 'SURRENDERED') {
+        await _fsService.updateRoomFen(_roomId, _controller.getFen());
+        await _fsService.surrender(_roomId, _playerName);
+
+        // chỉ hiển thị thông báo 1 lần duy nhất
+        if (!_hasShownSurrenderMessage) {
+          _hasShownSurrenderMessage = true;
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('$_playerName đã đầu hàng! Ván đấu kết thúc.'),
+              duration: const Duration(seconds: 2),
+            ),
+          );
+
+          // Chờ 2 giây rồi reset bàn cờ
+          await Future.delayed(const Duration(seconds: 2));
+          setState(() {
+            _controller.resetBoard();
+          });
+
+          // Cho phép hiển thị lại thông báo trong ván sau
+          _hasShownSurrenderMessage = false;
+        }
+      } else {
+        _fsService.updateRoomFen(_roomId, fen);
+      }
     }
   }
 
   void _copyRoomId() {
     if (_roomId.isEmpty) return;
     Clipboard.setData(ClipboardData(text: _roomId));
-    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Room ID copied')));
+    if (mounted)
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Room ID copied')));
   }
 
   Future<void> _leaveRoom() async {
@@ -169,7 +262,10 @@ class _HomePageState extends State<HomePage> {
       _roomId = '';
       _playersInRoom = [];
     });
-    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Left room')));
+    if (mounted)
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Left room')));
   }
 
   Widget _buildDrawer() {
@@ -178,10 +274,16 @@ class _HomePageState extends State<HomePage> {
         child: Column(
           children: [
             UserAccountsDrawerHeader(
-              accountName: Text(_playerName.isEmpty ? 'No name set' : _playerName),
-              accountEmail: Text(_roomId.isEmpty ? 'Not in room' : 'Room: $_roomId'),
+              accountName: Text(
+                _playerName.isEmpty ? 'No name set' : _playerName,
+              ),
+              accountEmail: Text(
+                _roomId.isEmpty ? 'Not in room' : 'Room: $_roomId',
+              ),
               currentAccountPicture: CircleAvatar(
-                child: Text((_playerName.isNotEmpty ? _playerName[0] : '?').toUpperCase()),
+                child: Text(
+                  (_playerName.isNotEmpty ? _playerName[0] : '?').toUpperCase(),
+                ),
               ),
             ),
             ListTile(
@@ -228,6 +330,15 @@ class _HomePageState extends State<HomePage> {
                 _leaveRoom();
               },
             ),
+            ListTile(
+              leading: const Icon(Icons.flag),
+              title: const Text('Đầu hàng'),
+              onTap: () {
+                Navigator.of(context).pop();
+                _surrender();
+              },
+            ),
+
             const Divider(),
             ListTile(
               leading: const Icon(Icons.info_outline),
@@ -256,10 +367,14 @@ class _HomePageState extends State<HomePage> {
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: Row(
-          children: _playersInRoom.map((p) => Padding(
-            padding: const EdgeInsets.only(right: 8.0),
-            child: Chip(label: Text(p)),
-          )).toList(),
+          children: _playersInRoom
+              .map(
+                (p) => Padding(
+                  padding: const EdgeInsets.only(right: 8.0),
+                  child: Chip(label: Text(p)),
+                ),
+              )
+              .toList(),
         ),
       ),
     );
@@ -292,7 +407,10 @@ class _HomePageState extends State<HomePage> {
               Container(
                 width: double.infinity,
                 color: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 10.0),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12.0,
+                  vertical: 10.0,
+                ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -304,9 +422,14 @@ class _HomePageState extends State<HomePage> {
                           ),
                         ),
                         const SizedBox(width: 12),
-                        Text('Room: ${_roomId.isEmpty ? "(not in room)" : _roomId}'),
+                        Text(
+                          'Room: ${_roomId.isEmpty ? "(not in room)" : _roomId}',
+                        ),
                         const SizedBox(width: 8),
-                        IconButton(onPressed: _copyRoomId, icon: const Icon(Icons.copy)),
+                        IconButton(
+                          onPressed: _copyRoomId,
+                          icon: const Icon(Icons.copy),
+                        ),
                       ],
                     ),
                     const SizedBox(height: 8),

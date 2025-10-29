@@ -59,7 +59,9 @@ class _FlutterChessWidgetState extends State<FlutterChessWidget> {
     final fen = widget.controller.getFen();
     await Clipboard.setData(ClipboardData(text: fen));
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('FEN copied to clipboard')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('FEN copied to clipboard')));
     }
   }
 
@@ -75,8 +77,14 @@ class _FlutterChessWidgetState extends State<FlutterChessWidget> {
           maxLines: 2,
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(null), child: const Text('Cancel')),
-          ElevatedButton(onPressed: () => Navigator.of(ctx).pop(controller.text.trim()), child: const Text('Load')),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(null),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(controller.text.trim()),
+            child: const Text('Load'),
+          ),
         ],
       ),
     );
@@ -84,21 +92,56 @@ class _FlutterChessWidgetState extends State<FlutterChessWidget> {
     if (result != null && result.isNotEmpty) {
       try {
         widget.controller.loadFen(result);
-        if (widget.onFenChanged != null) widget.onFenChanged!(widget.controller.getFen());
+        if (widget.onFenChanged != null)
+          widget.onFenChanged!(widget.controller.getFen());
       } catch (_) {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Invalid FEN')));
+        if (mounted)
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('Invalid FEN')));
       }
     }
   }
 
   void _undoMove() {
     widget.controller.undoMove();
-    if (widget.onFenChanged != null) widget.onFenChanged!(widget.controller.getFen());
+    if (widget.onFenChanged != null)
+      widget.onFenChanged!(widget.controller.getFen());
   }
 
   void _resetBoard() {
     widget.controller.resetBoard();
-    if (widget.onFenChanged != null) widget.onFenChanged!(widget.controller.getFen());
+    if (widget.onFenChanged != null)
+      widget.onFenChanged!(widget.controller.getFen());
+  }
+
+  void _onSurrenderPressed() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Xác nhận đầu hàng'),
+        content: const Text('Bạn có chắc chắn muốn đầu hàng không?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Không'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+            child: const Text('Đầu hàng'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      // Gửi callback để HomePage xử lý (nếu có)
+      if (widget.onFenChanged != null) widget.onFenChanged!('SURRENDERED');
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Bạn đã đầu hàng')));
+    }
   }
 
   @override
@@ -110,7 +153,10 @@ class _FlutterChessWidgetState extends State<FlutterChessWidget> {
     final screenH = media.size.height;
     final screenW = media.size.width;
     // leave room for appbar + controls (approx 220), but calculate defensively
-    final maxBoardHeight = min(screenH * 0.60, screenW - 32); // at most 60% screen height or fit width
+    final maxBoardHeight = min(
+      screenH * 0.60,
+      screenW - 32,
+    ); // at most 60% screen height or fit width
     final boardHeight = max(240.0, maxBoardHeight); // minimum reasonable size
 
     return Column(
@@ -121,11 +167,16 @@ class _FlutterChessWidgetState extends State<FlutterChessWidget> {
           width: double.infinity,
           child: Center(
             child: ConstrainedBox(
-              constraints: BoxConstraints(maxHeight: boardHeight, maxWidth: boardHeight),
+              constraints: BoxConstraints(
+                maxHeight: boardHeight,
+                maxWidth: boardHeight,
+              ),
               child: ChessBoard(
                 controller: widget.controller,
                 boardColor: BoardColor.brown,
-                boardOrientation: _isWhiteOrientation ? PlayerColor.white : PlayerColor.black,
+                boardOrientation: _isWhiteOrientation
+                    ? PlayerColor.white
+                    : PlayerColor.black,
                 enableUserMoves: true,
               ),
             ),
@@ -154,6 +205,18 @@ class _FlutterChessWidgetState extends State<FlutterChessWidget> {
                 icon: const Icon(Icons.refresh),
                 label: const Text('Reset'),
               ),
+              const SizedBox(width: 8),
+
+              // ✅ Nút đầu hàng
+              ElevatedButton.icon(
+                onPressed: _onSurrenderPressed,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.redAccent,
+                ),
+                icon: const Icon(Icons.flag),
+                label: const Text('Đầu hàng'),
+              ),
+
               const Spacer(),
               IconButton(
                 tooltip: 'Copy FEN',

@@ -42,10 +42,25 @@ class FirestoreService {
     }, SetOptions(merge: true));
   }
 
+  /// Mark the room as surrendered by a player.
+  Future<void> surrender(String roomId, String playerName) async {
+    await _db.collection('rooms').doc(roomId).set({
+      'surrenderedBy': playerName,
+      'winner': FieldValue.arrayRemove([
+        playerName,
+      ]), // hoặc xác định người thắng tùy logic
+      'endedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
   /// Listen to full room document. Callback receives the document data map (or null if not exists).
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>> listenRoom(
-      String roomId, void Function(Map<String, dynamic>? data) onRoomChanged) {
-    final sub = _db.collection('rooms').doc(roomId).snapshots().listen((snapshot) {
+    String roomId,
+    void Function(Map<String, dynamic>? data) onRoomChanged,
+  ) {
+    final sub = _db.collection('rooms').doc(roomId).snapshots().listen((
+      snapshot,
+    ) {
       if (snapshot.exists) {
         onRoomChanged(snapshot.data());
       } else {
