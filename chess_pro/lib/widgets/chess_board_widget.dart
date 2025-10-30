@@ -177,7 +177,23 @@ class _FlutterChessWidgetState extends State<FlutterChessWidget> {
               ElevatedButton.icon(onPressed: _resetBoard, icon: const Icon(Icons.refresh), label: const Text('Reset')),
               const SizedBox(width: 8),
               ElevatedButton.icon(onPressed: _onSurrenderPressed, style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent), icon: const Icon(Icons.flag), label: const Text('Đầu hàng')),
+              const SizedBox(width: 8),
+              ElevatedButton.icon(
+                onPressed: () {
+                  // Khi nhấn "Xin hòa", gọi callback nếu được truyền vào (HomePage sẽ xử lý Firestore)
+                  if (widget.onFenChanged != null) {
+                    widget.onFenChanged!("DRAW_REQUESTED");
+                  }
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Đã gửi lời đề nghị hòa')),
+                  );
+                },
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.lightBlueAccent),
+                icon: const Icon(Icons.handshake),
+                label: const Text('Xin hòa'),
+              ),
               const Spacer(),
+
               IconButton(tooltip: 'Copy FEN', onPressed: _copyFenToClipboard, icon: const Icon(Icons.copy)),
               IconButton(tooltip: 'Import FEN', onPressed: _importFenDialog, icon: const Icon(Icons.input)),
             ],

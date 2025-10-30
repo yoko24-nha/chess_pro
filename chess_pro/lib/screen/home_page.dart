@@ -25,8 +25,14 @@ class _HomePageState extends State<HomePage> {
   StreamSubscription? _roomSub;
   bool _isApplyingRemote = false;
   bool _hasShownSurrenderMessage = false;
+  bool _hasShownDrawDialog = false;
   String _playerName = '';
   List<String> _playersInRoom = [];
+
+  // --- DRAW FEATURE ---
+  String? _drawOfferedBy; // who offered draw (from server)
+  bool _isDraw = false;   // whether the game has become a draw
+  // --- END DRAW FEATURE ---
 
   // Clock state
   Timer? _clockTimer;
@@ -110,6 +116,11 @@ class _HomePageState extends State<HomePage> {
       }
       _timeoutWinner = null;
       _surrenderedBy = null;
+      // --- DRAW FEATURE ---
+      _drawOfferedBy = null;
+      _isDraw = false;
+      _hasShownDrawDialog = false;
+      // --- END DRAW FEATURE ---
     });
     _listenRoom(id);
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Room created: $id')));
@@ -168,6 +179,47 @@ class _HomePageState extends State<HomePage> {
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Bạn đã đầu hàng!')));
   }
 
+  Future<void> _showDrawOfferDialog(String offerPlayer) async {
+    final accept = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Lời đề nghị hòa'),
+        content: Text('$offerPlayer muốn hòa. Bạn có chấp nhận không?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Từ chối'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Chấp nhận'),
+          ),
+        ],
+      ),
+    );
+
+    if (accept == true) {
+      // call firestore respondDraw -> will set gameOver/result in DB
+      try {
+        await _fsService.respondDraw(_roomId, true);
+      } catch (e) {
+        debugPrint('[draw] respondDraw failed: $e');
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Ván cờ kết thúc hòa')),
+        );
+      }
+    } else if (accept == false) {
+      try {
+        await _fsService.respondDraw(_roomId, false);
+      } catch (e) {
+        debugPrint('[draw] reject failed: $e');
+      }
+    }
+  }
+
+
   // ----------------- CORE: listenRoom (robust) -----------------
   void _listenRoom(String roomId) {
     _roomSub?.cancel();
@@ -180,6 +232,10 @@ class _HomePageState extends State<HomePage> {
       // read raw fields safely
       final String? surrendered = data['surrenderedBy'] as String?;
       final String? timeoutWinner = data['timeoutWinner'] as String?;
+      // --- DRAW FEATURE: read draw fields from server ---
+      final String? drawOffer = (data['drawOffer'] is String) ? data['drawOffer'] as String : null;
+      final String? result = (data['result'] is String) ? data['result'] as String : null;
+      // --- END DRAW FEATURE ---
       final int timePer = (data['timePerPlayer'] is int) ? data['timePerPlayer'] as int : _timePerPlayer;
       final int whiteRemFromServer = (data['whiteRemaining'] is int) ? data['whiteRemaining'] as int : _whiteRemaining;
       final int blackRemFromServer = (data['blackRemaining'] is int) ? data['blackRemaining'] as int : _blackRemaining;
@@ -221,11 +277,24 @@ class _HomePageState extends State<HomePage> {
         _timeoutWinner = timeoutWinner;
         _surrenderedBy = surrendered;
         _playersInRoom = players;
+        // --- DRAW FEATURE state update ---
+        _drawOfferedBy = drawOffer;
+        // if server declares result == 'draw' we mark local flag
+        _isDraw = (result == 'draw');
       });
 
       // notifications
       if (surrendered != null) {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$surrendered đã đầu hàng!')));
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('$surrendered đã đầu hàng!')),
+          );
+
+          FirebaseFirestore.instance
+              .collection(_fsService.roomsColl)
+              .doc(roomId)
+              .update({'surrenderedBy': null});
+        }
       }
       if (timeoutWinner != null) {
         if (mounted) {
@@ -234,6 +303,28 @@ class _HomePageState extends State<HomePage> {
         }
         _clockTimer?.cancel();
       }
+
+      // --- DRAW FEATURE: react to draw offer / accepted ---
+      if (drawOffer != null && drawOffer != _playerName && result != 'draw') {
+        // someone else offered draw; show dialog once
+        if (!_hasShownDrawDialog) {
+          _hasShownDrawDialog = true;
+          // fire-and-forget dialog (dialog itself will call respondDraw)
+          _showDrawOfferDialog(drawOffer);
+        }
+      } else if (drawOffer == null) {
+        // reset shown flag so future offers will show again
+        _hasShownDrawDialog = false;
+      }
+
+      if (result == 'draw') {
+        // draw accepted (either respondedDraw set result = draw, or server did)
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ván cờ kết thúc hòa')));
+        }
+        _clockTimer?.cancel();
+      }
+      // --- END DRAW FEATURE ---
 
       // decide whether to start/stop ticker:
       final playersCount = players.length;
@@ -304,6 +395,21 @@ class _HomePageState extends State<HomePage> {
 void _onFenChanged(String fen) async {
   if (_isApplyingRemote) return;
   if (_roomId.isNotEmpty) {
+    // --- NEW: xử lý xin hòa ---
+    if (fen == 'DRAW_REQUESTED') {
+      await _fsService.offerDraw(_roomId, _playerName);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Đã gửi lời đề nghị hòa'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+      return; // không cần xử lý FEN tiếp
+    }
+    // --- END NEW ---
+
     if (fen == 'SURRENDERED') {
       await _fsService.updateRoomFen(_roomId, _controller.getFen());
       await _fsService.surrender(_roomId, _playerName);
@@ -327,25 +433,20 @@ void _onFenChanged(String fen) async {
     } else {
       // Nếu có clock thì dùng transaction để update room
       if (_timePerPlayer > 0) {
-        // Quyết định nextTurn **dựa trên bên vừa đi** (chính là _currentTurn trước khi đổi).
-        // Đây là cách ổn định hơn so với đọc controller.game.turn
         final sideMoved = _currentTurn; // 'white' hoặc 'black'
         final nextTurn = (sideMoved == 'white') ? 'black' : 'white';
 
         debugPrint('[local move] sideMoved=$sideMoved computed nextTurn=$nextTurn players=${_playersInRoom.length}');
 
-        // Nếu đã có >=2 players, cập nhật local ngay (optimistic) để UI chuyển đồng hồ tức thì
         if (_playersInRoom.length >= 2) {
           setState(() {
             _currentTurn = nextTurn;
           });
-          // restart ticker để tick bên mới
           if (_timePerPlayer > 0 && _timeoutWinner == null && _surrenderedBy == null) {
             _startClockTicker();
           }
         }
 
-        // Gọi transaction để server tính elapsed và cập nhật chính thức
         try {
           await _fsService.updateRoomOnMove(
             _roomId,
@@ -358,12 +459,12 @@ void _onFenChanged(String fen) async {
           debugPrint('[local move] updateRoomOnMove failed: $e');
         }
       } else {
-        // không dùng clock -> update fen bình thường
         await _fsService.updateRoomFen(_roomId, fen);
       }
     }
   }
 }
+
 
 
   void _copyRoomId() {
@@ -387,6 +488,11 @@ void _onFenChanged(String fen) async {
       _blackRemaining = 0;
       _timeoutWinner = null;
       _surrenderedBy = null;
+      // --- DRAW FEATURE reset ---
+      _drawOfferedBy = null;
+      _isDraw = false;
+      _hasShownDrawDialog = false;
+      // --- END DRAW FEATURE ---
     });
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Left room')));
   }
@@ -411,6 +517,19 @@ void _onFenChanged(String fen) async {
             ListTile(leading: const Icon(Icons.copy), title: const Text('Copy Room ID'), onTap: () { Navigator.of(context).pop(); _copyRoomId(); }),
             ListTile(leading: const Icon(Icons.exit_to_app), title: const Text('Leave Room'), onTap: () { Navigator.of(context).pop(); _leaveRoom(); }),
             ListTile(leading: const Icon(Icons.flag), title: const Text('Đầu hàng'), onTap: () { Navigator.of(context).pop(); _surrender(); }),
+            // --- DRAW FEATURE: Xin hòa in Drawer ---
+            ListTile(
+              leading: const Icon(Icons.handshake),
+              title: const Text('Xin hòa'),
+              onTap: () {
+                Navigator.of(context).pop();
+                if (_roomId.isNotEmpty && _playerName.isNotEmpty) {
+                  // call service to offer draw
+                  _fsService.offerDraw(_roomId, _playerName);
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Đã gửi lời đề nghị hòa')));
+                }
+              },
+            ),
             const Divider(),
             ListTile(leading: const Icon(Icons.info_outline), title: const Text('About'), onTap: () {
               Navigator.of(context).pop();
@@ -446,7 +565,7 @@ void _onFenChanged(String fen) async {
     try {
       cm = _controller.isCheckMate();
     } catch (_) { cm = false; }
-    return _timeoutWinner != null || _surrenderedBy != null || cm;
+    return _timeoutWinner != null || _surrenderedBy != null || cm || _isDraw;
   }
 
   @override
@@ -513,6 +632,19 @@ void _onFenChanged(String fen) async {
                         padding: const EdgeInsets.only(top: 8.0),
                         child: Text('$_surrenderedBy đã đầu hàng', style: const TextStyle(color: Colors.red)),
                       ),
+                    // --- DRAW FEATURE: visual indicators ---
+                    if (_drawOfferedBy != null && _drawOfferedBy != _playerName && !_isDraw)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8.0),
+                        child: Text('$_drawOfferedBy đã gửi lời đề nghị hòa...', style: const TextStyle(color: Colors.orange)),
+                      ),
+                    if (_isDraw)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8.0),
+                        child: Text('Ván cờ đã hòa', style: const TextStyle(color: Colors.green)),
+                      ),
+                    // --- END DRAW FEATURE ---
+                    
                   ],
                 ),
               ),
