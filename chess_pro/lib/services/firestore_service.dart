@@ -62,7 +62,9 @@ class FirestoreService {
     String roomId,
     void Function(Map<String, dynamic>? data) onRoomChanged,
   ) {
-    final sub = _db.collection(roomsColl).doc(roomId).snapshots().listen((snapshot) {
+    final sub = _db.collection(roomsColl).doc(roomId).snapshots().listen((
+      snapshot,
+    ) {
       if (snapshot.exists) {
         onRoomChanged(snapshot.data());
       } else {
@@ -86,7 +88,9 @@ class FirestoreService {
       if (!snap.exists) return;
 
       final data = snap.data()!;
-      final playersList = (data['players'] is List) ? (data['players'] as List) : [];
+      final playersList = (data['players'] is List)
+          ? (data['players'] as List)
+          : [];
       final playersCount = playersList.length;
 
       if (playersCount < 2) {
@@ -100,10 +104,12 @@ class FirestoreService {
       final int timePerPlayer = (data['timePerPlayer'] is int)
           ? data['timePerPlayer'] as int
           : (whiteRemaining > 0 ? whiteRemaining : 0);
-      final int serverWhite =
-          (data['whiteRemaining'] is int) ? data['whiteRemaining'] as int : whiteRemaining;
-      final int serverBlack =
-          (data['blackRemaining'] is int) ? data['blackRemaining'] as int : blackRemaining;
+      final int serverWhite = (data['whiteRemaining'] is int)
+          ? data['whiteRemaining'] as int
+          : whiteRemaining;
+      final int serverBlack = (data['blackRemaining'] is int)
+          ? data['blackRemaining'] as int
+          : blackRemaining;
       final String currentTurn = (data['turn'] as String?) ?? 'white';
 
       int elapsed = 0;
@@ -185,5 +191,24 @@ class FirestoreService {
         }
       }
     });
+  }
+
+  /// Gửi tin nhắn trong room
+  Future<void> sendMessage(String roomId, String sender, String text) async {
+    await _db.collection('rooms').doc(roomId).collection('messages').add({
+      'sender': sender,
+      'text': text,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  /// Lắng nghe tin nhắn realtime
+  Stream<QuerySnapshot<Map<String, dynamic>>> listenMessages(String roomId) {
+    return _db
+        .collection('rooms')
+        .doc(roomId)
+        .collection('messages')
+        .orderBy('createdAt', descending: true)
+        .snapshots();
   }
 }
