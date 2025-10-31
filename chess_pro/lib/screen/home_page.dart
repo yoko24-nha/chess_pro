@@ -393,14 +393,35 @@ class _HomePageState extends State<HomePage> {
       }
 
       if (result == 'draw') {
-        // draw accepted (either respondedDraw set result = draw, or server did)
         if (mounted) {
           ScaffoldMessenger.of(
             context,
           ).showSnackBar(const SnackBar(content: Text('Ván cờ kết thúc hòa')));
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Ván cờ kết thúc hòa')),
+          );
         }
+
         _clockTimer?.cancel();
+
+        // ✅ Reset board & local state
+        Future.delayed(const Duration(milliseconds: 300), () {
+          if (!mounted) return;
+
+          setState(() {
+            _controller.resetBoard();
+            _whiteRemaining = _timePerPlayer;
+            _blackRemaining = _timePerPlayer;
+            _currentTurn = 'white';
+            _drawOfferedBy = null;
+            _isDraw = false;
+            _hasShownDrawDialog = false;
+          });
+          // ✅ Clear result & drawOffer in Firestore after reset
+          _fsService.clearGameResult(_roomId);
+        });
       }
+
       // --- END DRAW FEATURE ---
 
       // decide whether to start/stop ticker:

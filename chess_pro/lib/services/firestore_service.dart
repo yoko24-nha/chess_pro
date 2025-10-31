@@ -211,4 +211,25 @@ class FirestoreService {
         .orderBy('createdAt', descending: true)
         .snapshots();
   }
+    // Reset bàn cờ sau khi cả hai đồng ý hòa
+  Future<void> requestResetAfterDraw(String roomId) async {
+    await _db.collection(roomsColl).doc(roomId).set({
+      'resetRequested': true,
+    }, SetOptions(merge: true));
+  }
+
+  Future<void> clearResetSignal(String roomId) async {
+    await _db.collection(roomsColl).doc(roomId).set({
+      'resetRequested': false,
+    }, SetOptions(merge: true));
+  }
+  // Clear result/drawOffer/winner/resetRequested to stop repeated notifications
+  Future<void> clearGameResult(String roomId) async {
+    await _db.collection(roomsColl).doc(roomId).update({
+      'result': FieldValue.delete(),
+      'drawOffer': FieldValue.delete(),
+      'winner': FieldValue.delete(),
+      'resetRequested': FieldValue.delete(),
+    });
+  }
 }
