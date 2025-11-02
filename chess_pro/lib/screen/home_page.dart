@@ -36,6 +36,14 @@ class _HomePageState extends State<HomePage> {
   String _playerName = '';
   List<String> _playersInRoom = [];
 
+  // Player color tracking
+  String? _creatorName;
+  String? _whitePlayer;
+  String? _blackPlayer;
+  int _gameNumber = 1;
+  List<String> _rematchRequests = [];
+  bool? _playerColor; // true = white, false = black, null = unknown/AI mode
+
   // Game flags / result
   String? _surrenderedBy;
   String? _timeoutWinner;
@@ -236,6 +244,12 @@ class _HomePageState extends State<HomePage> {
     );
     setState(() {
       _roomId = id;
+      _creatorName = _playerName;
+      _whitePlayer = _playerName;
+      _blackPlayer = null;
+      _gameNumber = 1;
+      _playerColor = true; // Người tạo phòng cầm quân trắng
+      _rematchRequests = [];
       if (timePerSec != null) {
         _timePerPlayer = timePerSec;
         _whiteRemaining = timePerSec;
@@ -294,11 +308,43 @@ class _HomePageState extends State<HomePage> {
       _isDraw = false;
       _hasShownDrawDialog = false;
       _firstMoveMade = false; // Reset khi rời room
+      _creatorName = null;
+      _whitePlayer = null;
+      _blackPlayer = null;
+      _gameNumber = 1;
+      _rematchRequests = [];
+      _playerColor = null;
     });
     if (mounted)
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Left room')));
+  }
+
+  Future<void> _requestRematch() async {
+    if (_roomId.isEmpty || _playerName.isEmpty) return;
+    await _fsService.requestRematch(_roomId, _playerName);
+    if (mounted)
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Đã gửi yêu cầu tái đấu')));
+  }
+
+  Future<void> _acceptRematch() async {
+    if (_roomId.isEmpty) return;
+    // Kiểm tra cả 2 người đã request rematch
+    if (_rematchRequests.length < 2) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Cần cả 2 người chơi yêu cầu tái đấu')),
+        );
+      return;
+    }
+    await _fsService.acceptRematch(_roomId);
+    if (mounted)
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Đã chấp nhận tái đấu')));
   }
 
   void _listenRoom(String roomId) {
@@ -339,6 +385,28 @@ class _HomePageState extends State<HomePage> {
         }
       }
 
+      // Update player color tracking
+      final creatorName = data['creatorName'] as String?;
+      final whitePlayer = data['whitePlayer'] as String?;
+      final blackPlayer = data['blackPlayer'] as String?;
+      final gameNumber = (data['gameNumber'] as int?) ?? 1;
+      final rematchRequests =
+          (data['rematchRequests'] as List?)
+              ?.map((e) => e.toString())
+              .toList() ??
+          [];
+      final rematchAccepted = (data['rematchAccepted'] as bool?) ?? false;
+
+      // Xác định player color của current user
+      bool? playerColor;
+      if (_playerName.isNotEmpty) {
+        if (whitePlayer == _playerName) {
+          playerColor = true; // white
+        } else if (blackPlayer == _playerName) {
+          playerColor = false; // black
+        }
+      }
+
       int adjustedWhite = whiteRemFromServer;
       int adjustedBlack = blackRemFromServer;
       if (lastUpdate != null && timePer > 0) {
@@ -356,6 +424,12 @@ class _HomePageState extends State<HomePage> {
       debugPrint('[listenRoom] turn=$serverTurn players=${players.length}');
 
       setState(() {
+        _creatorName = creatorName;
+        _whitePlayer = whitePlayer;
+        _blackPlayer = blackPlayer;
+        _gameNumber = gameNumber;
+        _rematchRequests = rematchRequests;
+        _playerColor = playerColor;
         _timePerPlayer = timePer;
         _whiteRemaining = adjustedWhite;
         _blackRemaining = adjustedBlack;
@@ -367,15 +441,49 @@ class _HomePageState extends State<HomePage> {
         _isDraw = (result == 'draw');
       });
 
+      // Xử lý rematch accepted - reset board
+      if (rematchAccepted) {
+        debugPrint('[LISTENROOM] Rematch accepted, resetting board');
+        // Giảm delay để responsive hơn
+        Future.microtask(() {
+          if (!mounted) return;
+          setState(() {
+            _controller.resetBoard();
+            _whiteRemaining = _timePerPlayer;
+            _blackRemaining = _timePerPlayer;
+            _currentTurn = 'white';
+            _drawOfferedBy = null;
+            _isDraw = false;
+            _hasShownDrawDialog = false;
+            _firstMoveMade = false;
+            _timeoutWinner = null;
+            _surrenderedBy = null;
+            _rematchRequests =
+                []; // Clear rematch requests khi game mới bắt đầu
+            _fenHistory.clear();
+            _addFenToHistory(_controller.getFen());
+          });
+          // Clear rematchAccepted flag và các game result flags
+          FirebaseFirestore.instance
+              .collection(_fsService.roomsColl)
+              .doc(roomId)
+              .update({
+                'rematchAccepted': false,
+                'surrenderedBy': FieldValue.delete(),
+                'result': FieldValue.delete(),
+                'timeoutWinner': FieldValue.delete(),
+              });
+        });
+      }
+
       if (surrendered != null) {
         if (mounted)
           ScaffoldMessenger.of(
             context,
           ).showSnackBar(SnackBar(content: Text('$surrendered đã đầu hàng!')));
-        FirebaseFirestore.instance
-            .collection(_fsService.roomsColl)
-            .doc(roomId)
-            .update({'surrenderedBy': null});
+        _clockTimer?.cancel();
+        // KHÔNG clear surrenderedBy ngay để UI rematch có thể hiển thị
+        // Chỉ clear khi rematch được chấp nhận
       }
       if (timeoutWinner != null) {
         if (mounted) {
@@ -404,20 +512,8 @@ class _HomePageState extends State<HomePage> {
             context,
           ).showSnackBar(const SnackBar(content: Text('Ván cờ kết thúc hòa')));
         _clockTimer?.cancel();
-        Future.delayed(const Duration(milliseconds: 300), () {
-          if (!mounted) return;
-          setState(() {
-            _controller.resetBoard();
-            _whiteRemaining = _timePerPlayer;
-            _blackRemaining = _timePerPlayer;
-            _currentTurn = 'white';
-            _drawOfferedBy = null;
-            _isDraw = false;
-            _hasShownDrawDialog = false;
-            _firstMoveMade = false; // Reset khi ván hòa
-          });
-          _fsService.clearGameResult(_roomId);
-        });
+        // KHÔNG reset board ngay để UI rematch có thể hiển thị
+        // Chỉ reset khi rematch được chấp nhận
       }
 
       // KHÔNG tự động start đồng hồ khi có 2 players
@@ -445,18 +541,35 @@ class _HomePageState extends State<HomePage> {
             fen == _lastAppliedFen;
         if (isAIMoveEcho) {
           debugPrint('[LISTENROOM] ignoring AI move echo from server');
+          return;
+        }
+
+        // Kiểm tra nếu đây là echo của nước vừa đánh (optimistic update)
+        if (_lastAppliedFen == fen) {
+          final since = DateTime.now()
+              .difference(
+                _lastAppliedFenAt ?? DateTime.fromMillisecondsSinceEpoch(0),
+              )
+              .inMilliseconds;
+          // Nếu trong vòng 500ms, coi như echo của nước vừa đánh
+          if (since < 500) {
+            debugPrint('[LISTENROOM] ignoring echo of recent move');
+            return;
+          }
         }
 
         _isApplyingRemote = true;
         try {
           _controller.loadFen(fen);
           debugPrint('[LISTENROOM] loaded fen from server: $fen');
+          _addFenToHistory(fen);
         } catch (e) {
           debugPrint('[LISTENROOM] loadFen error: $e');
         }
-        Future.delayed(const Duration(milliseconds: 120), () {
+
+        // Giảm delay xuống tối thiểu
+        Future.microtask(() {
           _isApplyingRemote = false;
-          _addFenToHistory(fen);
           // Chỉ trigger AI nếu đây KHÔNG phải echo của nước AI
           if (!isAIMoveEcho) {
             _maybeTriggerAIMove();
@@ -613,7 +726,8 @@ class _HomePageState extends State<HomePage> {
       _aiScheduled = true;
       debugPrint('[AI] scheduled for humanId=$scheduledFor');
 
-      Future.delayed(const Duration(milliseconds: 200), () async {
+      // Giảm delay xuống tối thiểu cho responsive hơn
+      Future.microtask(() async {
         // if human moved again since scheduling, abort
         if (_humanMoveId != scheduledFor) {
           debugPrint(
@@ -1004,6 +1118,11 @@ class _HomePageState extends State<HomePage> {
 
     // Normal move: if in room, update server; otherwise local -> trigger AI
     if (_roomId.isNotEmpty) {
+      // Optimistic update: add to history ngay lập tức
+      _addFenToHistory(fen);
+      _lastAppliedFen = fen;
+      _lastAppliedFenAt = DateTime.now();
+
       if (_timePerPlayer > 0) {
         // Xác định bên vừa đánh dựa trên lượt hiện tại trong FEN
         final turnInFen = _turnFromFen(fen);
@@ -1037,30 +1156,30 @@ class _HomePageState extends State<HomePage> {
             _startClockTicker();
           }
         }
-        try {
-          await _fsService.updateRoomOnMove(
-            _roomId,
-            fen,
-            whiteRemaining: _whiteRemaining,
-            blackRemaining: _blackRemaining,
-            nextTurn: nextTurn,
-          );
-        } catch (e) {
-          debugPrint('[ONFEN] updateRoomOnMove failed: $e');
-        }
+
+        // Update server async - không đợi response
+        _fsService
+            .updateRoomOnMove(
+              _roomId,
+              fen,
+              whiteRemaining: _whiteRemaining,
+              blackRemaining: _blackRemaining,
+              nextTurn: nextTurn,
+            )
+            .catchError((e) {
+              debugPrint('[ONFEN] updateRoomOnMove failed: $e');
+            });
       } else {
-        try {
-          await _fsService.updateRoomFen(_roomId, fen);
-        } catch (e) {
+        // Update server async - không đợi response
+        _fsService.updateRoomFen(_roomId, fen).catchError((e) {
           debugPrint('[ONFEN] updateRoomFen failed: $e');
-        }
+        });
       }
-      // server will push fen back and listener will apply; it will also add to history there
     } else {
       // local-only: record history and check AI
       _addFenToHistory(fen);
-      // small delay then maybe trigger AI
-      Future.delayed(const Duration(milliseconds: 200), () {
+      // Trigger AI ngay lập tức, không delay
+      Future.microtask(() {
         final since = DateTime.now()
             .difference(
               _lastAppliedFenAt ?? DateTime.fromMillisecondsSinceEpoch(0),
@@ -1401,7 +1520,21 @@ class _HomePageState extends State<HomePage> {
               .map(
                 (p) => Padding(
                   padding: const EdgeInsets.only(right: 8.0),
-                  child: Chip(label: Text(p)),
+                  child: Chip(
+                    label: Text(p),
+                    avatar: CircleAvatar(
+                      backgroundColor: Theme.of(
+                        context,
+                      ).primaryColor.withOpacity(0.2),
+                      child: Text(
+                        p.isNotEmpty ? p[0].toUpperCase() : '?',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Theme.of(context).primaryColor,
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
               )
               .toList(),
@@ -1410,240 +1543,658 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  Widget _buildChatBubble(String sender, String text, bool isMe) {
+    return Padding(
+      padding: EdgeInsets.only(
+        top: 4.0,
+        bottom: 4.0,
+        left: isMe ? 50.0 : 8.0,
+        right: isMe ? 8.0 : 50.0,
+      ),
+      child: Column(
+        crossAxisAlignment: isMe
+            ? CrossAxisAlignment.end
+            : CrossAxisAlignment.start,
+        children: [
+          if (!isMe)
+            Padding(
+              padding: const EdgeInsets.only(left: 8.0, bottom: 4.0),
+              child: Text(
+                sender,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.grey[600],
+                ),
+              ),
+            ),
+          Container(
+            constraints: BoxConstraints(
+              maxWidth: MediaQuery.of(context).size.width * 0.7,
+            ),
+            decoration: BoxDecoration(
+              color: isMe ? Theme.of(context).primaryColor : Colors.grey[200],
+              borderRadius: BorderRadius.only(
+                topLeft: const Radius.circular(16),
+                topRight: const Radius.circular(16),
+                bottomLeft: Radius.circular(isMe ? 16 : 4),
+                bottomRight: Radius.circular(isMe ? 4 : 16),
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.1),
+                  blurRadius: 4,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 12.0,
+              vertical: 8.0,
+            ),
+            child: Text(
+              text,
+              style: TextStyle(
+                color: isMe ? Colors.white : Colors.black87,
+                fontSize: 14,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       resizeToAvoidBottomInset: false,
-      appBar: AppBar(title: const Text('Chess — Local + Firestore')),
+      appBar: AppBar(title: const Text('Chess Pro'), elevation: 2),
       drawer: _buildDrawer(),
       body: SafeArea(
         child: SingleChildScrollView(
           child: Column(
             children: [
+              // Chess Board
               Padding(
-                padding: const EdgeInsets.all(12.0),
-                child: FlutterChessWidget(
-                  controller: _controller,
-                  onFenChanged: _onFenChanged,
-                  enableUserMoves: !_isGameOver,
-                  boardColor: _boardColor,
+                padding: const EdgeInsets.all(16.0),
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.1),
+                        blurRadius: 8,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: FlutterChessWidget(
+                      controller: _controller,
+                      onFenChanged: _onFenChanged,
+                      enableUserMoves: !_isGameOver,
+                      boardColor: _boardColor,
+                      autoOrientation:
+                          _roomId.isNotEmpty && _playerColor != null,
+                      isPlayerWhite: _playerColor,
+                    ),
+                  ),
                 ),
               ),
-              const Divider(),
-              Container(
-                width: double.infinity,
-                color: Colors.white,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12.0,
-                  vertical: 10.0,
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Row(
+
+              // Clock Display - Below board
+              if (_timePerPlayer > 0)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[50],
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.grey[200]!),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.05),
+                          blurRadius: 4,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                       children: [
                         Expanded(
-                          child: Text(
-                            'Player: ${_playerName.isEmpty ? "(set your name from menu)" : _playerName}',
+                          child: _buildClockDisplay(
+                            _whitePlayer ?? 'Trắng',
+                            _whiteRemaining,
+                            _currentTurn == 'white',
                           ),
                         ),
-                        const SizedBox(width: 12),
-                        Text(
-                          'Room: ${_roomId.isEmpty ? "(not in room)" : _roomId}',
+                        Container(
+                          width: 1,
+                          height: 60,
+                          color: Colors.grey[300],
                         ),
-                        const SizedBox(width: 8),
-                        IconButton(
-                          onPressed: _copyRoomId,
-                          icon: const Icon(Icons.copy),
+                        Expanded(
+                          child: _buildClockDisplay(
+                            _blackPlayer ?? 'Đen',
+                            _blackRemaining,
+                            _currentTurn == 'black',
+                          ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 8),
-                    Row(
+                  ),
+                ),
+
+              const SizedBox(height: 16),
+
+              // Game Info Card
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                child: Card(
+                  elevation: 2,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text('Players in room: '),
-                        const SizedBox(width: 8),
-                        Expanded(child: _playersWidget()),
-                      ],
-                    ),
-                    const Divider(height: 32),
-                    Text(
-                      'Chat:',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    Container(
-                      height: 200,
-                      margin: const EdgeInsets.symmetric(
-                        horizontal: 12.0,
-                        vertical: 8.0,
-                      ),
-                      padding: const EdgeInsets.all(8.0),
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade100,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.grey.shade300),
-                      ),
-                      child: _roomId.isEmpty
-                          ? const Center(
-                              child: Text('(Tham gia phòng để chat)'),
-                            )
-                          : StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                              stream: _chatStream,
-                              builder: (context, snapshot) {
-                                if (!snapshot.hasData)
-                                  return const Center(
-                                    child: CircularProgressIndicator(),
-                                  );
-                                final docs = snapshot.data!.docs;
-                                if (docs.isEmpty)
-                                  return const Text('(Chưa có tin nhắn)');
-                                return ListView.builder(
-                                  reverse: true,
-                                  itemCount: docs.length,
-                                  itemBuilder: (ctx, i) {
-                                    final msg = docs[i].data();
-                                    final sender = msg['sender'] ?? 'Unknown';
-                                    final text = msg['text'] ?? '';
-                                    return Align(
-                                      alignment: sender == _playerName
-                                          ? Alignment.centerRight
-                                          : Alignment.centerLeft,
-                                      child: Container(
-                                        margin: const EdgeInsets.symmetric(
-                                          vertical: 2,
-                                        ),
-                                        padding: const EdgeInsets.all(8),
-                                        decoration: BoxDecoration(
-                                          color: sender == _playerName
-                                              ? Colors.blue.shade100
-                                              : Colors.grey.shade300,
-                                          borderRadius: BorderRadius.circular(
-                                            8,
-                                          ),
-                                        ),
-                                        child: Text('$sender: $text'),
-                                      ),
-                                    );
-                                  },
-                                );
-                              },
-                            ),
-                    ),
-                    if (_roomId.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12.0,
-                          vertical: 4.0,
-                        ),
-                        child: Row(
+                        // Player Info
+                        Row(
                           children: [
                             Expanded(
-                              child: TextField(
-                                controller: _chatController,
-                                decoration: const InputDecoration(
-                                  hintText: 'Nhập tin nhắn...',
-                                  border: OutlineInputBorder(),
-                                  isDense: true,
-                                ),
-                                onSubmitted: (_) => _sendMessage(),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Người chơi',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.grey[600],
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Row(
+                                    children: [
+                                      Text(
+                                        _playerName.isEmpty
+                                            ? "(Chưa đặt tên)"
+                                            : _playerName,
+                                        style: const TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                      if (_roomId.isNotEmpty &&
+                                          _playerColor != null) ...[
+                                        const SizedBox(width: 8),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 8,
+                                            vertical: 4,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: _playerColor!
+                                                ? Colors.white
+                                                : Colors.black87,
+                                            borderRadius: BorderRadius.circular(
+                                              12,
+                                            ),
+                                            border: Border.all(
+                                              color: Colors.grey,
+                                              width: 1,
+                                            ),
+                                          ),
+                                          child: Text(
+                                            _playerColor! ? 'Trắng' : 'Đen',
+                                            style: TextStyle(
+                                              color: _playerColor!
+                                                  ? Colors.black87
+                                                  : Colors.white,
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                ],
                               ),
                             ),
+                            if (_roomId.isNotEmpty) ...[
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.end,
+                                children: [
+                                  Text(
+                                    'Room ID',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.grey[600],
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        _roomId,
+                                        style: const TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w600,
+                                          fontFamily: 'monospace',
+                                        ),
+                                      ),
+                                      const SizedBox(width: 4),
+                                      IconButton(
+                                        onPressed: _copyRoomId,
+                                        icon: const Icon(Icons.copy, size: 18),
+                                        padding: EdgeInsets.zero,
+                                        constraints: const BoxConstraints(),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        // Players in room
+                        if (_roomId.isNotEmpty) ...[
+                          Text(
+                            'Người chơi trong phòng',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[600],
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          _playersWidget(),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 16),
+
+              // Chat Section
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                child: Card(
+                  elevation: 2,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.all(16.0),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.chat_bubble_outline,
+                              color: Theme.of(context).primaryColor,
+                            ),
                             const SizedBox(width: 8),
-                            IconButton(
-                              icon: const Icon(Icons.send, color: Colors.blue),
-                              onPressed: _sendMessage,
+                            Text(
+                              'Chat',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: Theme.of(context).primaryColor,
+                              ),
                             ),
                           ],
                         ),
                       ),
-                    const SizedBox(height: 12),
-                    if (_timePerPlayer > 0)
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                        children: [
-                          Column(
+                      Container(
+                        height: 250,
+                        decoration: BoxDecoration(
+                          color: Colors.grey[50],
+                          borderRadius: const BorderRadius.only(
+                            bottomLeft: Radius.circular(12),
+                            bottomRight: Radius.circular(12),
+                          ),
+                        ),
+                        child: _roomId.isEmpty
+                            ? Center(
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      Icons.chat_bubble_outline,
+                                      size: 48,
+                                      color: Colors.grey[400],
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      'Tham gia phòng để chat',
+                                      style: TextStyle(
+                                        color: Colors.grey[600],
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              )
+                            : StreamBuilder<
+                                QuerySnapshot<Map<String, dynamic>>
+                              >(
+                                stream: _chatStream,
+                                builder: (context, snapshot) {
+                                  if (!snapshot.hasData)
+                                    return const Center(
+                                      child: CircularProgressIndicator(),
+                                    );
+                                  final docs = snapshot.data!.docs;
+                                  if (docs.isEmpty)
+                                    return Center(
+                                      child: Column(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
+                                        children: [
+                                          Icon(
+                                            Icons.message,
+                                            size: 48,
+                                            color: Colors.grey[400],
+                                          ),
+                                          const SizedBox(height: 8),
+                                          Text(
+                                            'Chưa có tin nhắn nào',
+                                            style: TextStyle(
+                                              color: Colors.grey[600],
+                                              fontSize: 14,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                  return ListView.builder(
+                                    reverse: true,
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8.0,
+                                      vertical: 8.0,
+                                    ),
+                                    itemCount: docs.length,
+                                    itemBuilder: (ctx, i) {
+                                      final msg = docs[i].data();
+                                      final sender = msg['sender'] ?? 'Unknown';
+                                      final text = msg['text'] ?? '';
+                                      final isMe = sender == _playerName;
+                                      return _buildChatBubble(
+                                        sender,
+                                        text,
+                                        isMe,
+                                      );
+                                    },
+                                  );
+                                },
+                              ),
+                      ),
+                      if (_roomId.isNotEmpty)
+                        Container(
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: const BorderRadius.only(
+                              bottomLeft: Radius.circular(12),
+                              bottomRight: Radius.circular(12),
+                            ),
+                          ),
+                          padding: const EdgeInsets.all(12.0),
+                          child: Row(
                             children: [
-                              Text(
-                                'White',
-                                style: TextStyle(
-                                  fontWeight: _currentTurn == 'white'
-                                      ? FontWeight.bold
-                                      : FontWeight.normal,
+                              Expanded(
+                                child: TextField(
+                                  controller: _chatController,
+                                  decoration: InputDecoration(
+                                    hintText: 'Nhập tin nhắn...',
+                                    filled: true,
+                                    fillColor: Colors.grey[100],
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(24),
+                                      borderSide: BorderSide.none,
+                                    ),
+                                    contentPadding: const EdgeInsets.symmetric(
+                                      horizontal: 16,
+                                      vertical: 10,
+                                    ),
+                                  ),
+                                  onSubmitted: (_) => _sendMessage(),
                                 ),
                               ),
-                              Text(
-                                _formatTime(_whiteRemaining),
-                                style: const TextStyle(
-                                  fontSize: 18,
-                                  fontFamily: 'monospace',
+                              const SizedBox(width: 8),
+                              Container(
+                                decoration: BoxDecoration(
+                                  color: Theme.of(context).primaryColor,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: IconButton(
+                                  icon: const Icon(
+                                    Icons.send,
+                                    color: Colors.white,
+                                  ),
+                                  onPressed: _sendMessage,
                                 ),
                               ),
                             ],
                           ),
-                          Column(
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+
+              // Rematch Section
+              if (_roomId.isNotEmpty &&
+                  _isGameOver &&
+                  _playersInRoom.length >= 2)
+                Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Card(
+                    elevation: 2,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    color: Colors.blue[50],
+                    child: Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
                             children: [
-                              Text(
-                                'Black',
-                                style: TextStyle(
-                                  fontWeight: _currentTurn == 'black'
-                                      ? FontWeight.bold
-                                      : FontWeight.normal,
-                                ),
+                              Icon(
+                                Icons.refresh,
+                                color: Theme.of(context).primaryColor,
                               ),
+                              const SizedBox(width: 8),
                               Text(
-                                _formatTime(_blackRemaining),
-                                style: const TextStyle(
-                                  fontSize: 18,
-                                  fontFamily: 'monospace',
+                                'Tái đấu',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                  color: Theme.of(context).primaryColor,
                                 ),
                               ),
                             ],
+                          ),
+                          const SizedBox(height: 12),
+                          if (_rematchRequests.contains(_playerName))
+                            Text(
+                              'Bạn đã gửi yêu cầu tái đấu',
+                              style: TextStyle(color: Colors.grey[700]),
+                            )
+                          else
+                            ElevatedButton.icon(
+                              onPressed: _requestRematch,
+                              icon: const Icon(Icons.refresh),
+                              label: const Text('Yêu cầu tái đấu'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Theme.of(context).primaryColor,
+                                foregroundColor: Colors.white,
+                              ),
+                            ),
+                          if (_rematchRequests.isNotEmpty) ...[
+                            const SizedBox(height: 8),
+                            Text(
+                              'Người đã yêu cầu: ${_rematchRequests.join(", ")}',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey[600],
+                              ),
+                            ),
+                          ],
+                          if (_rematchRequests.length >= 2) ...[
+                            const SizedBox(height: 12),
+                            SizedBox(
+                              width: double.infinity,
+                              child: ElevatedButton.icon(
+                                onPressed: _acceptRematch,
+                                icon: const Icon(Icons.check),
+                                label: const Text('Chấp nhận tái đấu'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.green,
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 12,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+
+              // Game Status Messages
+              if (_timeoutWinner != null ||
+                  _surrenderedBy != null ||
+                  (_drawOfferedBy != null &&
+                      _drawOfferedBy != _playerName &&
+                      !_isDraw) ||
+                  _isDraw)
+                Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Card(
+                    color: _timeoutWinner != null || _surrenderedBy != null
+                        ? Colors.red[50]
+                        : _isDraw
+                        ? Colors.green[50]
+                        : Colors.orange[50],
+                    elevation: 2,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Row(
+                        children: [
+                          Icon(
+                            _timeoutWinner != null || _surrenderedBy != null
+                                ? Icons.flag
+                                : _isDraw
+                                ? Icons.handshake
+                                : Icons.notifications,
+                            color:
+                                _timeoutWinner != null || _surrenderedBy != null
+                                ? Colors.red
+                                : _isDraw
+                                ? Colors.green
+                                : Colors.orange,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              _timeoutWinner != null
+                                  ? (_timeoutWinner == 'white'
+                                        ? 'Bên trắng thắng (hết thời gian)'
+                                        : 'Bên đen thắng (hết thời gian)')
+                                  : _surrenderedBy != null
+                                  ? '$_surrenderedBy đã đầu hàng'
+                                  : _isDraw
+                                  ? 'Ván cờ đã hòa'
+                                  : '$_drawOfferedBy đã gửi lời đề nghị hòa...',
+                              style: TextStyle(
+                                color:
+                                    _timeoutWinner != null ||
+                                        _surrenderedBy != null
+                                    ? Colors.red[900]
+                                    : _isDraw
+                                    ? Colors.green[900]
+                                    : Colors.orange[900],
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
                           ),
                         ],
                       ),
-                    if (_timeoutWinner != null)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8.0),
-                        child: Text(
-                          _timeoutWinner == 'white'
-                              ? 'bên trắng thắng (timeout)'
-                              : 'bên đen thắng (timeout)',
-                          style: const TextStyle(color: Colors.red),
-                        ),
-                      ),
-                    if (_surrenderedBy != null)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8.0),
-                        child: Text(
-                          '$_surrenderedBy đã đầu hàng',
-                          style: const TextStyle(color: Colors.red),
-                        ),
-                      ),
-                    if (_drawOfferedBy != null &&
-                        _drawOfferedBy != _playerName &&
-                        !_isDraw)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8.0),
-                        child: Text(
-                          '$_drawOfferedBy đã gửi lời đề nghị hòa...',
-                          style: const TextStyle(color: Colors.orange),
-                        ),
-                      ),
-                    if (_isDraw)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8.0),
-                        child: Text(
-                          'Ván cờ đã hòa',
-                          style: const TextStyle(color: Colors.green),
-                        ),
-                      ),
-                  ],
+                    ),
+                  ),
                 ),
-              ),
+
+              const SizedBox(height: 16),
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildClockDisplay(String playerName, int seconds, bool isActive) {
+    final timeColor = seconds < 60
+        ? Colors.red
+        : seconds < 300
+        ? Colors.orange
+        : Colors.black87;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      decoration: BoxDecoration(
+        color: isActive
+            ? Theme.of(context).primaryColor.withOpacity(0.1)
+            : Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: isActive
+            ? Border.all(color: Theme.of(context).primaryColor, width: 2)
+            : Border.all(color: Colors.grey[300]!, width: 1),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            playerName,
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: isActive ? FontWeight.bold : FontWeight.w600,
+              color: isActive
+                  ? Theme.of(context).primaryColor
+                  : Colors.grey[800],
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _formatTime(seconds),
+            style: TextStyle(
+              fontSize: 28,
+              fontFamily: 'monospace',
+              fontWeight: FontWeight.bold,
+              color: timeColor,
+            ),
+          ),
+        ],
       ),
     );
   }
