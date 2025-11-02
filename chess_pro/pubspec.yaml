@@ -34,11 +34,16 @@ dependencies:
   flutter_chess_board: ^1.0.1
   chess: ^0.7.0
 
+  stockfish: ^1.7.1
+
 
 # Firebase (Firestore)
   firebase_core: ^4.2.0
   cloud_firestore: ^6.0.3
   firebase_auth: ^6.1.1
+
+# Local storage
+  shared_preferences: ^2.2.2
 
 
 # State management (optional)

@@ -1,13 +1,13 @@
 {
   "project_info": {
-    "project_number": "431342837775",
-    "project_id": "chess-pro-app",
-    "storage_bucket": "chess-pro-app.firebasestorage.app"
+    "project_number": "929898668919",
+    "project_id": "test-7e1a5",
+    "storage_bucket": "test-7e1a5.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:431342837775:android:7c2d46794623defcae437a",
+        "mobilesdk_app_id": "1:929898668919:android:75bb025ab8e0742a983772",
         "android_client_info": {
           "package_name": "com.example.chess"
         }
@@ -15,7 +15,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyAlL6dIiSZt-t1q1qFDBgQC_DuZalhwoOs"
+          "current_key": "AIzaSyA2iydUpW2eiZSfl8PzMbknOuoitAG7tnQ"
         }
       ],
       "services": {

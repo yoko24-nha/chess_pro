@@ -10,12 +10,14 @@ class FlutterChessWidget extends StatefulWidget {
   final void Function(String fen)? onFenChanged;
   final String? initialFen;
   final bool enableUserMoves; // <-- mới
+  final BoardColor? boardColor; // Theme của bàn cờ
   const FlutterChessWidget({
     Key? key,
     required this.controller,
     this.onFenChanged,
     this.initialFen,
     this.enableUserMoves = true,
+    this.boardColor,
   }) : super(key: key);
 
   @override
@@ -51,13 +53,18 @@ class _FlutterChessWidgetState extends State<FlutterChessWidget> {
       if (widget.controller.isCheckMate() && !_hasShownGameOverMessage) {
         _hasShownGameOverMessage = true;
 
-        final winner = (widget.controller.game.turn == 'w' || widget.controller.game.turn == 'W')
+        final winner =
+            (widget.controller.game.turn == 'w' ||
+                widget.controller.game.turn == 'W')
             ? 'bên đen thắng'
             : 'bên trắng thắng';
 
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(winner), duration: const Duration(seconds: 3)),
+            SnackBar(
+              content: Text(winner),
+              duration: const Duration(seconds: 3),
+            ),
           );
         }
       }
@@ -76,7 +83,9 @@ class _FlutterChessWidgetState extends State<FlutterChessWidget> {
     final fen = widget.controller.getFen();
     await Clipboard.setData(ClipboardData(text: fen));
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('FEN copied to clipboard')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('FEN copied to clipboard')));
     }
   }
 
@@ -92,8 +101,14 @@ class _FlutterChessWidgetState extends State<FlutterChessWidget> {
           maxLines: 2,
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(null), child: const Text('Cancel')),
-          ElevatedButton(onPressed: () => Navigator.of(ctx).pop(controller.text.trim()), child: const Text('Load')),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(null),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(controller.text.trim()),
+            child: const Text('Load'),
+          ),
         ],
       ),
     );
@@ -102,22 +117,28 @@ class _FlutterChessWidgetState extends State<FlutterChessWidget> {
       try {
         widget.controller.loadFen(result);
         _hasShownGameOverMessage = false;
-        if (widget.onFenChanged != null) widget.onFenChanged!(widget.controller.getFen());
+        if (widget.onFenChanged != null)
+          widget.onFenChanged!(widget.controller.getFen());
       } catch (_) {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Invalid FEN')));
+        if (mounted)
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('Invalid FEN')));
       }
     }
   }
 
   void _undoMove() {
     widget.controller.undoMove();
-    if (widget.onFenChanged != null) widget.onFenChanged!(widget.controller.getFen());
+    if (widget.onFenChanged != null)
+      widget.onFenChanged!(widget.controller.getFen());
   }
 
   void _resetBoard() {
     widget.controller.resetBoard();
     _hasShownGameOverMessage = false;
-    if (widget.onFenChanged != null) widget.onFenChanged!(widget.controller.getFen());
+    if (widget.onFenChanged != null)
+      widget.onFenChanged!(widget.controller.getFen());
   }
 
   void _onSurrenderPressed() async {
@@ -127,15 +148,24 @@ class _FlutterChessWidgetState extends State<FlutterChessWidget> {
         title: const Text('Xác nhận đầu hàng'),
         content: const Text('Bạn có chắc chắn muốn đầu hàng không?'),
         actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Không')),
-          ElevatedButton(onPressed: () => Navigator.of(ctx).pop(true), style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent), child: const Text('Đầu hàng')),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Không'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+            child: const Text('Đầu hàng'),
+          ),
         ],
       ),
     );
 
     if (confirm == true) {
       if (widget.onFenChanged != null) widget.onFenChanged!('SURRENDERED');
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Bạn đã đầu hàng')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Bạn đã đầu hàng')));
     }
   }
 
@@ -156,11 +186,16 @@ class _FlutterChessWidgetState extends State<FlutterChessWidget> {
           width: double.infinity,
           child: Center(
             child: ConstrainedBox(
-              constraints: BoxConstraints(maxHeight: boardHeight, maxWidth: boardHeight),
+              constraints: BoxConstraints(
+                maxHeight: boardHeight,
+                maxWidth: boardHeight,
+              ),
               child: ChessBoard(
                 controller: widget.controller,
-                boardColor: BoardColor.brown,
-                boardOrientation: _isWhiteOrientation ? PlayerColor.white : PlayerColor.black,
+                boardColor: widget.boardColor ?? BoardColor.brown,
+                boardOrientation: _isWhiteOrientation
+                    ? PlayerColor.white
+                    : PlayerColor.black,
                 enableUserMoves: widget.enableUserMoves,
               ),
             ),
@@ -170,13 +205,32 @@ class _FlutterChessWidgetState extends State<FlutterChessWidget> {
           padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 6.0),
           child: Row(
             children: [
-              ElevatedButton.icon(onPressed: _toggleOrientation, icon: const Icon(Icons.screen_rotation), label: const Text('Flip')),
+              ElevatedButton.icon(
+                onPressed: _toggleOrientation,
+                icon: const Icon(Icons.screen_rotation),
+                label: const Text('Flip'),
+              ),
               const SizedBox(width: 8),
-              ElevatedButton.icon(onPressed: _undoMove, icon: const Icon(Icons.undo), label: const Text('Undo')),
+              ElevatedButton.icon(
+                onPressed: _undoMove,
+                icon: const Icon(Icons.undo),
+                label: const Text('Undo'),
+              ),
               const SizedBox(width: 8),
-              ElevatedButton.icon(onPressed: _resetBoard, icon: const Icon(Icons.refresh), label: const Text('Reset')),
+              ElevatedButton.icon(
+                onPressed: _resetBoard,
+                icon: const Icon(Icons.refresh),
+                label: const Text('Reset'),
+              ),
               const SizedBox(width: 8),
-              ElevatedButton.icon(onPressed: _onSurrenderPressed, style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent), icon: const Icon(Icons.flag), label: const Text('Đầu hàng')),
+              ElevatedButton.icon(
+                onPressed: _onSurrenderPressed,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.redAccent,
+                ),
+                icon: const Icon(Icons.flag),
+                label: const Text('Đầu hàng'),
+              ),
               const SizedBox(width: 8),
               ElevatedButton.icon(
                 onPressed: () {
@@ -188,14 +242,24 @@ class _FlutterChessWidgetState extends State<FlutterChessWidget> {
                     const SnackBar(content: Text('Đã gửi lời đề nghị hòa')),
                   );
                 },
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.lightBlueAccent),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.lightBlueAccent,
+                ),
                 icon: const Icon(Icons.handshake),
                 label: const Text('Xin hòa'),
               ),
               const Spacer(),
 
-              IconButton(tooltip: 'Copy FEN', onPressed: _copyFenToClipboard, icon: const Icon(Icons.copy)),
-              IconButton(tooltip: 'Import FEN', onPressed: _importFenDialog, icon: const Icon(Icons.input)),
+              IconButton(
+                tooltip: 'Copy FEN',
+                onPressed: _copyFenToClipboard,
+                icon: const Icon(Icons.copy),
+              ),
+              IconButton(
+                tooltip: 'Import FEN',
+                onPressed: _importFenDialog,
+                icon: const Icon(Icons.input),
+              ),
             ],
           ),
         ),
@@ -206,7 +270,10 @@ class _FlutterChessWidgetState extends State<FlutterChessWidget> {
           color: Colors.grey.shade100,
           child: SingleChildScrollView(
             scrollDirection: Axis.horizontal,
-            child: Text(moves.isEmpty ? 'No moves yet' : moves.join('  '), style: const TextStyle(fontFamily: 'monospace')),
+            child: Text(
+              moves.isEmpty ? 'No moves yet' : moves.join('  '),
+              style: const TextStyle(fontFamily: 'monospace'),
+            ),
           ),
         ),
       ],
