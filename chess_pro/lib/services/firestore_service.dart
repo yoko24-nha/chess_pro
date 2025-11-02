@@ -232,4 +232,20 @@ class FirestoreService {
       'resetRequested': FieldValue.delete(),
     });
   }
+
+  Future<void> saveUserTheme(String userId, String theme) async {
+  await FirebaseFirestore.instance
+      .collection('users')
+      .doc(userId)
+      .set({'theme': theme}, SetOptions(merge: true));
+}
+
+  Stream<String?> listenUserTheme(String userId) {
+    return FirebaseFirestore.instance
+        .collection('users')
+        .doc(userId)
+        .snapshots()
+        .map((snap) => snap.data()?['theme'] as String?);
+  }
+
 }
